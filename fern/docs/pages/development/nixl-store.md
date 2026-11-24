@@ -44,7 +44,7 @@ For a local NIXL build, follow [Building NIXL from Source](/nixl/developer-guide
 | `python/nixl_store` | Python package included by maturin |
 | `bench` | Benchmark executable and launch scripts |
 
-The Manager protocol lives in `crates/types/proto/manager.proto` and is compiled by prost-build. Component notes live in `docs/`; the older Python design there has superseded signatures. Read `crates/python-bindings/README.md` for the actual binding revision you build. The IPC-backed node and connector workflow depends on Linux; do not infer whole-workspace portability from platform-independent metadata logic.
+The Manager protocol lives in `crates/types/proto/manager.proto` and is compiled by prost-build. Component notes live in `docs/`; the older Python design there has superseded signatures. The Python binding guide lives in `crates/python-bindings/README.md`. The IPC-backed node and connector workflow depends on Linux; do not infer whole-workspace portability from platform-independent metadata logic.
 
 ## Building
 
@@ -137,9 +137,9 @@ Rust uses `Connector::connect(Options)`, `put`, `upsert`, `get`, `get_with`, `si
 
 <!-- src: NB_Nixl-Store/crates/nsconnector/src/config.rs; crates/nsconnector/src/session.rs -->
 
-<Note>
-The signatures below are the author-approved Python RFC contract. They differ from the checked-in bindings: the source still accepts byte write values, explicit read capacity and the older callback selectors. Consult `crates/python-bindings/README.md` in your checkout before running code. The Quick Start uses that current implementation.
-</Note>
+Python applications connect with `nixl_store.Connector(socket, namespace)` and close the connection with `close()`. The namespace is fixed for that connector.
+
+<!-- src: Python API signatures supplied by documentation author from the RFC; publication follows implementation landing. -->
 
 ```text
 put(key, value: Buffer, /, *, copy: Copy = None) -> PutResult
@@ -152,14 +152,15 @@ size_query_many(keys) -> list[SizeResult]
 clear_many(keys) -> Future[list[Status]]
 clear(key) -> Future[Status]
 size_query(key) -> int
-register_copy_fn(src_device, dst_device, fn | None) -> None
+register_copy_fn(src_device, dst_device, fn: mem_copy_f | None) -> None
 BufferRef.from_buffer(obj)
 BufferRef.from_address(ptr, nbytes, device)
+mem_copy_f(dst: BufferRef, src: BufferRef, nbytes) -> Status
 ```
 
-A contract `Buffer` is a C-contiguous CPU buffer-protocol object or a `BufferRef`; reads require writable storage. `copy=None` uses the registered device-pair function or built-in copy. `copy=function` bypasses registration for that call. The function receives destination, source and byte count, and returns a status. It must finish synchronously, retain no callback buffer references and avoid reentry into the same connector.
+A `Buffer` is a C-contiguous CPU buffer-protocol object or a `BufferRef`; reads require writable storage. `copy=None` uses the registered device-pair function or built-in copy. `copy=function` bypasses registration for that call. The function receives destination, source and byte count, and returns a status. It must finish synchronously, retain no callback buffer references and avoid reentry into the same connector.
 
-Successful writes return after publication. `PutResult` includes status and an optional placement descriptor. `GetResult` includes status, destination state and bytes copied when complete. `SizeResult` includes status and optional size. Size-query failure raises `StoreError` with `.status`; it is not atomic with a later read. Clear returns a Future that resolves when the binding is invisible.
+Successful put and upsert calls block until the key is visible to all consumers. Reads write at most the destination buffer's byte length (`nbytes`). `PutResult` includes status and an optional placement descriptor. `GetResult` includes status, destination state and bytes copied when complete. `SizeResult` includes status and optional size. Size-query failure raises `StoreError` with `.status`; it is not atomic with a later read. Clear returns a Future that resolves when the binding is invisible.
 
 Batches preserve input order with per-item results. Duplicate keys receive `DUPLICATE_KEY`; exceeding the batch limit raises `StoreError(INVALID_INPUT)` before submission. Overlapping read destinations raise `ValueError` without submission. These are admission rules, not a promise that a whole batch commits atomically.
 
@@ -176,7 +177,7 @@ Batches preserve input order with per-item results. Duplicate keys receive `DUPL
 | `CLOSED` | Attachment closed |
 | `DEADLINE` | Deadline reached |
 
-Handle reads, asynchronous data methods, GPU buffers and placement-descriptor read hints are future contract capabilities, not available operations described by this guide. SSD support is also planned; no release date or persistence guarantee is implied.
+Handle reads, asynchronous data methods, GPU buffers and placement-descriptor read hints are future capabilities. SSD support is also planned; no release date or persistence guarantee is implied.
 
 <!-- src: NB_Nixl-Store/crates/types/src/manager_rpc.rs; crates/nsclient/tests/binary.rs -->
 

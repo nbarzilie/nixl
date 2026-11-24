@@ -21,7 +21,7 @@ You connect through a small library API and identify objects by namespace and ke
 - **Atomic replacement** -- Upsert publishes a new slot while existing readers finish with the previous value.
 - **Safe reclamation** -- Clear removes a binding before reclaiming memory held by active readers.
 - **Shared memory** -- Applications attach to the node's pre-registered staging pool.
-- **Application-controlled copy** -- Use the built-in CPU copy, register a function or select a read callback.
+- **Application-controlled copy** -- Use the built-in CPU copy, register a function or select a per-call write or read callback.
 - **Rust and Python bindings** -- Embed NSConnector in Rust or use the Python package on Linux x86_64 with CPython 3.12.
 
 <!-- src: NB_Nixl-Store/crates/nsconnector/src/session.rs; crates/python-bindings/README.md -->

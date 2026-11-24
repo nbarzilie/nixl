@@ -44,9 +44,9 @@ This uses the built-in memory configuration. The socket path is required, either
 
 ## Store and Read a Value
 
-<Note>
-The [Python contract](/nixl/developer-guide/nixl-store#bindings) uses `get(key, dest)` and `copy=None` or `copy=function`. The current source bindings still require an explicit read capacity. This executable example uses those bindings; it does not require the contract changes to be implemented first.
-</Note>
+Pass the destination buffer directly to `get`. Its byte length bounds the copy. The default `copy=None` selects the registered copy function or the built-in CPU copy. See [Bindings](/nixl/developer-guide/nixl-store#bindings) for buffer ownership and per-call copy functions.
+
+<!-- src: Python API signatures supplied by documentation author from the RFC; publication follows implementation landing. -->
 
 ```bash
 .venv/bin/python - <<'PYTHON'
@@ -57,7 +57,7 @@ try:
     result = store.upsert(b"example", b"hello")
     assert result.status == ns.Status.COMPLETED
     destination = bytearray(5)
-    result = store.get(b"example", ns.BufferRef.from_buffer(destination), len(destination))
+    result = store.get(b"example", destination)
     assert result.status == ns.Status.COMPLETED
     assert result.destination_state == ns.DestinationState.COMPLETE
     assert result.bytes_copied == 5

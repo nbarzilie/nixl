@@ -50,9 +50,9 @@ An unavailable Manager prevents reliable metadata progress. An already posted NI
 
 The NSClient attaches applications through a Unix socket with same-user admission and maps staging into their processes. The NSConnector owns application-side submission and copy work, not authoritative metadata. It never contacts the Manager directly and does not own a NIXL agent.
 
-The Python contract uses these copy selections. The current binding syntax differs, as described in [Bindings](/nixl/developer-guide/nixl-store#bindings).
+Python writes and reads accept these copy selections. See [Bindings](/nixl/developer-guide/nixl-store#bindings) for signatures and buffer requirements.
 
-| Contract selection | Behavior |
+| Copy selection | Behavior |
 | --- | --- |
 | `copy=None` | Use the registered function for the device pair, or the built-in copy |
 | `copy=function` | Use that function for this call, bypassing registration |
