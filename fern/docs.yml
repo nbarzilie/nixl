@@ -105,6 +105,14 @@ navigation:
             path: ./docs/pages/user-guide/backends/doca-memos.md
           - page: GUSLI
             path: ./docs/pages/user-guide/backends/gusli.md
+      - section: NIXL Store
+        collapsed: open-by-default
+        path: ./docs/pages/user-guide/nixl-store/index.md
+        contents:
+          - page: Architecture
+            path: ./docs/pages/user-guide/nixl-store/architecture.md
+          - page: Quick Start
+            path: ./docs/pages/user-guide/nixl-store/quick-start.md
       - page: "Metadata Exchange with etcd"
         path: ./docs/pages/user-guide/etcd-metadata-exchange.md
       - page: Telemetry Guide
@@ -144,6 +152,8 @@ navigation:
             path: ./docs/pages/user-guide/building-nixl/python-bindings.md
           - page: Rust Bindings
             path: ./docs/pages/user-guide/building-nixl/rust-bindings.md
+      - page: NIXL Store
+        path: ./docs/pages/development/nixl-store.md
       - page: Contribution Guide
         path: ./docs/pages/development/contribution-guide.md
 
