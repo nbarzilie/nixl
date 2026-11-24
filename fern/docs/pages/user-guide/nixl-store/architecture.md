@@ -5,36 +5,41 @@ description: How NIXL Store components coordinate placement, transfers and objec
 
 ## Design Overview
 
-1. **Manager** -- The central metadata authority owns key bindings, slot states, reference counts, the peer catalog and Global Segment allocation.
-2. **NSClient** -- A per-node process owns registered memory, its NIXL agent and transfer progress.
-3. **NSConnector** -- The library inside each application reaches the NSClient over a Unix socket. Python exposes it as `nixl_store`.
+1. **Manager** - The central metadata authority owns key bindings, slot states, reference counts, the peer catalog and Global Segment allocation.
+2. **NSClient** - A per-node process owns registered memory, its NIXL agent and transfer progress. An embedded NSClient is planned for a future version.
+3. **NSConnector** - The library inside each application reaches the NSClient over a Unix socket. Python exposes it as `nixl_store`.
 
-Run one NSClient on each participating node and attach each application to its local process. Run the Manager separately. Every put and get consults the Manager, including operations whose storage is on the initiating node. A namespace is fixed when you create a connector and scopes the keys used by that connection.
+Run one NSClient on each participating node and attach each application to its local process. Run the Manager separately. Global Segments use Manager-coordinated placement and reference tracking. Local Segments let the NSClient allocate capacity and resolve locally hosted objects while coordinating their shared lifecycle with the Manager. A namespace is fixed when you create a connector and scopes the keys used by that connection.
 
 The Manager decides where objects live and when readers can see them. NSClients move payload bytes directly through NIXL. No payload passes through the Manager. NIXL Store provides no separate transport: it uses NIXL registration, connection metadata and transfers. See [NIXL Architecture](/nixl/getting-started/architecture) for the underlying agent model.
 
 ## Memory Pool
 
-A **region** is a contiguous range of NSClient memory registered with NIXL as one unit, with its own epoch. In NIXL Store, a **segment** is a unit of store capacity backed by one registered region -- not a NIXL memory segment. A **slot** is one allocation inside a segment.
+A **region** is a contiguous range of NSClient memory registered with NIXL as one unit, with its own epoch. In NIXL Store, a **segment** is a unit of store capacity backed by one registered region - not a NIXL memory segment. A **slot** is one allocation inside a segment.
 
-**Staging** is a region with no segment. It is shared with connectors and is never published to peers. A **Global Segment** holds objects placed by the Manager. Both use CPU DRAM.
+**Staging** is a region with no segment. It is shared with connectors and is never published to peers. A **Local Segment** holds objects in capacity allocated by its owning NSClient. A **Global Segment** holds objects in capacity allocated by the Manager. Both segment types use CPU DRAM. Local allocation and Global allocation share the same visibility and reclamation contract.
 
 | Memory | Allocation | Holds key bindings | Manager visibility |
 | --- | --- | --- | --- |
 | Staging | NSClient staging pool | No | Not published as a segment |
+| Local Segment | Owning NSClient allocator | Yes | Registered in the catalog; allocation owned by the NSClient |
 | Global Segment | Manager allocator | Yes | Registered in the catalog |
 
-Staging uses configured slot classes. Global Segments specify capacity, minimum and maximum object sizes, and alignment. A large Global Segment alone does not permit larger writes: every value must also fit a staging slot. An oversized value returns `VALUE_TOO_LARGE`. Staging contention can instead require waiting for a suitable slot.
+Allocators are pluggable per segment. Fixed size-class allocation suits object sizes known in advance; buddy allocation supports dynamically sized objects. Different segments can use different allocators. Staging uses configured slot classes, while segment configuration defines capacity, object-size bounds and alignment. A large Global Segment alone does not permit larger writes: every value must also fit a staging slot. An oversized value returns `VALUE_TOO_LARGE`. Staging contention can instead require waiting for a suitable slot.
 
 A transfer writes a reserved slot, not an already visible object's storage. Failed writes therefore cannot publish partial replacements. Uncertain transfers require quarantine rather than immediate buffer reuse.
 
 <Note>
-The NSClient registers regions at startup. Individual operations reuse that registration rather than registering each application's buffers as store capacity. SSD support is planned as a future capability.
+The NSClient registers regions at startup. Individual operations reuse that registration rather than registering each application's buffers as store capacity.
 </Note>
 
 ## Manager
 
-The Manager binds namespace/key pairs to slots, tracks their states and references, and allocates capacity from registered Global Segments. It owns neither the physical memory nor payload bytes. Its default placement policy is local-first, with randomized choices within a tier. Local-first means preference among Global Segments; it does not bypass the Manager or staging.
+The Manager binds namespace/key pairs to slots, tracks their states and references, and allocates capacity from registered Global Segments. It owns neither the physical memory nor payload bytes. Placement policies rank eligible segments:
+
+- **Local-first** - Prefer placement on the requesting node, with randomized choices within each tier. This is the default.
+- **Free-ratio** - Prefer segments with a higher reported free-capacity ratio to balance free space across segments.
+- **Random** - Select randomly among eligible segments.
 
 NSClients publish connection metadata and region metadata through the Manager. Another NSClient fetches peer metadata lazily when it needs a transfer destination or source. Epoch checks distinguish registrations so cached information is not accepted for a different region lifetime. This path does not require an application-managed etcd service; compare [Metadata Exchange with etcd](/nixl/user-guide/metadata-exchange-with-etcd).
 
@@ -42,7 +47,7 @@ An unavailable Manager prevents reliable metadata progress. An already posted NI
 
 ## NSClient and NSConnector
 
-The NSClient attaches applications through a Unix socket with same-user admission and maps staging into their processes. The NSConnector owns application-side submission and copy work, not authoritative metadata. It never contacts the Manager directly and does not own a NIXL agent.
+The NSClient attaches applications through a Unix socket with same-user admission and maps staging into their processes. The NSConnector owns application-side submission and copy work, not authoritative metadata. In the initial standalone deployment, the NSConnector reaches the Manager through the NSClient and does not own a NIXL agent.
 
 Python writes and reads accept these copy selections. See [Bindings](/nixl/developer-guide/nixl-store#bindings) for signatures and buffer requirements.
 
@@ -51,7 +56,7 @@ Python writes and reads accept these copy selections. See [Bindings](/nixl/devel
 | `copy=None` | Use the registered function for the device pair, or the built-in copy |
 | `copy=function` | Use that function for this call, bypassing registration |
 
-Copy functions run on the connector's copy worker. Their buffer views expire when they return. Do not retain addresses, schedule background access or reenter the same connector. Return success only after the requested bytes have been copied. A failed callback can leave the read destination partially modified.
+Copy functions run on the connector's copy worker and complete before the operation proceeds. A failed copy can leave the read destination partially modified. See [Bindings](/nixl/developer-guide/nixl-store#bindings) for callback lifetime and reentry rules.
 
 <Info>
 Your framework orders producers and consumers. NIXL Store does not schedule application work or notify a consumer that a producer is ready. A key becomes available through the store's commit contract.
@@ -59,7 +64,7 @@ Your framework orders producers and consumers. NIXL Store does not schedule appl
 
 ## Data Flow: Two-Node Example
 
-Node A runs an application that produces and consumes objects. Node B provides storage. Both run an NSClient and share a Manager. The following phases show initialization, write, read, clear and failure handling. Solid arrows show requests; dashed arrows show results or observed NIXL transfer completion. Transfer completion arrows represent the initiating agent observing completion, not an application-level reply from the storage process. Storage placement is the Manager's decision; the diagrams show an object stored on node B.
+Node A runs an application that produces and consumes objects. Node B provides storage. Both run an NSClient and share a Manager. The following phases show initialization, write, read, clear and failure handling. Solid arrows show requests; dashed arrows show results or observed NIXL transfer completion. Transfer completion arrows represent the initiating agent observing completion, not an application-level reply from the storage process. Solid arrows show requests; dashed arrows show results or observed NIXL transfer completion. Transfer completion arrows represent the initiating agent observing completion, not an application-level reply from the storage process. Storage placement is the Manager's decision; the diagrams show an object stored on node B.
 
 <Info>
 Initialize services and attachments once. Repeat put, get and clear for each application lifecycle. A new connector does not need a private NIXL registration.
@@ -80,13 +85,6 @@ Initialize services and attachments once. Repeat put, get and clear for each app
 
 Start the Manager, then each NSClient. The NSClient creates and registers its regions with NIXL before publishing its Global Segments to the Manager. Publishing first would advertise memory before usable transfer metadata exists. Connection metadata and region metadata describe the storage regions; staging is excluded. Finally, attach the application's connector to its local socket and map the offered staging memory.
 
-```
-start Manager
-start NSClient A and NSClient B with pool configurations
-register regions with NIXL
-publish Global Segments to Manager
-attach producer and consumer connectors
-```
 
 ### Put
 
@@ -101,7 +99,7 @@ attach producer and consumer connectors
 </Frame>
 </div>
 
-The Manager reserves a Global slot. The producer's connector copies the value into staging, and its NSClient performs a NIXL WRITE to the selected slot. Only a successful transfer followed by commit makes the binding visible. The blocking write returns a status and an optional placement descriptor; check the status before treating publication as successful.
+For a Global placement, the Manager reserves a slot before the NSClient offers staging to the producer's connector. The connector then copies the value into staging. This copy can overlap the lookup of peer metadata needed for the transfer. Once both are ready, the NSClient performs a NIXL WRITE to the reserved slot. Only a successful transfer followed by commit makes the binding visible. The blocking write returns a status and an optional placement descriptor; check the status before treating publication as successful.
 
 Put rejects an existing binding with `PUT_REJECT`. Upsert reserves new storage and atomically replaces the binding at commit. Readers already holding the previous slot can finish before it is reclaimed. A failed WRITE does not publish the new slot and enters the failure path below.
 
@@ -125,7 +123,7 @@ upsert(key, replacement)
 
 The Manager resolves the key and takes a reference to the committed slot. The consumer's NSClient reads it into staging through NIXL. When that transfer completes, it queues release of the stored-object reference and offers staging for the connector's copy. Staging remains protected until that copy finishes; the stored slot need not remain pinned for the application copy.
 
-A concurrent clear or replacement cannot reuse a slot while its acquired read is in progress. A later resolution sees the new binding or a missing key. Size query is a separate operation, so an intervening replacement can change the required capacity. Inspect destination state: `UNTOUCHED`, `MAY_BE_PARTIAL` or `COMPLETE`. Consume bytes only after a successful, complete result.
+Once a get acquires a reference to a committed slot, that slot remains allocated until the NIXL read into staging finishes. A concurrent clear removes the key for new readers, but the acquired read can still finish with the old value. An upsert publishes a replacement in a different slot, so existing reads finish with the old value while reads resolved after the commit receive the replacement. After a clear, a new read finds no binding unless another write has recreated the key. Size query is a separate operation, so an intervening replacement can change the required capacity. Inspect destination state: `UNTOUCHED`, `MAY_BE_PARTIAL` or `COMPLETE`. Consume bytes only after a successful, complete result.
 
 ```
 capacity = size_query(key)
@@ -167,9 +165,9 @@ status = future.wait()
 </Frame>
 </div>
 
-A joining NSClient registers its segments with the Manager. Existing peers fetch its metadata lazily. The implementation does not provide a complete administrative drain-and-remove workflow. Clearing keys and waiting for application work alone is not evidence that an arbitrary dead peer can be safely removed from all metadata.
+A joining NSClient registers its segments with the Manager. Existing peers fetch its metadata lazily.
 
-RPC sessions use heartbeats to detect lost connections. There is no session resume or replay contract. A dead NSClient loses its volatile memory; dead-peer cleanup is not automatic. Application attachment teardown handles local outstanding work, but it does not erase all keys written by that application. Do not treat reconnecting as recovery of prior uncertain operations.
+RPC sessions use heartbeats to detect lost connections. There is no session resume or replay contract. A dead NSClient loses its volatile memory. Automatic dead-peer cleanup is planned to reconcile its catalog entries and outstanding references safely. Application attachment teardown handles local outstanding work, but it does not erase all keys written by that application. Do not treat reconnecting as recovery of prior uncertain operations.
 
 After a failed or abandoned WRITE, the NSClient fences the peer agent and quarantines staging that may still be accessed. The Manager quarantines the target slot. The operation is not retried automatically. Epochs and generations detect stale metadata and slot identities; they do not stop an already issued transfer by themselves. Safe reuse therefore also requires transfer completion or fencing and quarantine.
 

@@ -3,7 +3,7 @@ title: Quick Start
 description: Start the services and store and read a value through the Python bindings.
 ---
 
-This walkthrough starts a Manager, one NSClient and a Python application on a Linux x86_64 node. It uses CPU DRAM and UCX. Run source commands from `runtime/store` in your NIXL checkout. Use separate terminals for the two services and the application.
+This walkthrough starts a Manager, one NSClient and a Python application on a Linux x86_64 node. It uses CPU DRAM and UCX. NIXL Store is planned to ship in the NIXL wheel after release. This walkthrough uses a source build from `runtime/store` in your NIXL checkout. Use separate terminals for the two services and the application.
 
 ## Install
 

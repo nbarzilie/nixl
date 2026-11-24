@@ -112,8 +112,8 @@ cargo test --workspace --locked
 .venv/bin/python -m pytest python/tests -q
 scripts/test-python-e2e.sh
 scripts/test-python-msrv.sh
-cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --locked --no-deps -- -D warnings
+cargo fmt --all - --check
+cargo clippy --workspace --all-targets --locked --no-deps - -D warnings
 ```
 
 The NSClient binary integration test starts real services and exercises connector operations, callbacks and batches. Run it with `cargo test --locked -p nixl-store-nsclient --test binary`.
