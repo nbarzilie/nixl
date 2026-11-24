@@ -3,7 +3,7 @@ title: Quick Start
 description: Start the services and store and read a value through the Python bindings.
 ---
 
-This walkthrough starts a Manager, one NSClient and a Python application on a Linux x86_64 node. It uses CPU DRAM and UCX. Run source commands from your NIXL Store checkout, `NB_Nixl-Store`, rather than the NIXL documentation repository. Use separate terminals for the two services and the application.
+This walkthrough starts a Manager, one NSClient and a Python application on a Linux x86_64 node. It uses CPU DRAM and UCX. Run source commands from `runtime/store` in your NIXL checkout. Use separate terminals for the two services and the application.
 
 ## Install
 
@@ -22,8 +22,6 @@ python3.12 -m venv .venv
 
 Export the same library paths in the NSClient terminal. Installing the wheel installs the application library; it does not start either service. The fetched wheel supplies UCX for this CPU path.
 
-<!-- src: NB_Nixl-Store/ci/fetch-nixl.sh; crates/python-bindings/README.md -->
-
 ## Start the Manager
 
 ```bash
@@ -40,13 +38,9 @@ Wait for `Manager Global business service started`. The default control address 
 
 This uses the built-in memory configuration. The socket path is required, either here or in a configuration file. Run the application as the same operating-system user as the NSClient. Keep the socket path identical in both commands.
 
-<!-- src: NB_Nixl-Store/crates/manager/src/main.rs; crates/nsclient/src/main.rs -->
-
 ## Store and Read a Value
 
 Pass the destination buffer directly to `get`. Its byte length bounds the copy. The default `copy=None` selects the registered copy function or the built-in CPU copy. See [Bindings](/nixl/developer-guide/nixl-store#bindings) for buffer ownership and per-call copy functions.
-
-<!-- src: Python API signatures supplied by documentation author from the RFC; publication follows implementation landing. -->
 
 ```bash
 .venv/bin/python - <<'PYTHON'

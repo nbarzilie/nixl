@@ -11,8 +11,6 @@ Producers and consumers can run in different processes and on different nodes. T
 
 You connect through a small library API and identify objects by namespace and key. NIXL Store owns placement, visibility and reclamation. NIXL owns memory registration, connections and transfers. The store uses CPU DRAM over UCX. It does not expose every memory type or backend supported by NIXL.
 
-<!-- src: NB_Nixl-Store/crates/nsclient/src/orchestration/put.rs; crates/nsclient/src/registration.rs -->
-
 ## Key Capabilities
 
 - **Key-value operations** -- Put, upsert, get, clear and query an object's size within a connector's namespace.
@@ -24,8 +22,6 @@ You connect through a small library API and identify objects by namespace and ke
 - **Application-controlled copy** -- Use the built-in CPU copy, register a function or select a per-call write or read callback.
 - **Rust and Python bindings** -- Embed NSConnector in Rust or use the Python package on Linux x86_64 with CPython 3.12.
 
-<!-- src: NB_Nixl-Store/crates/nsconnector/src/session.rs; crates/python-bindings/README.md -->
-
 <Tip>
 You do not register store memory or count remote readers yourself. The node process and Manager coordinate these lifetimes. See [Architecture](/nixl/user-guide/nixl-store/architecture).
 </Tip>
@@ -34,8 +30,6 @@ You do not register store memory or count remote readers yourself. The node proc
 Values must fit the largest staging slot. The current store is volatile and uses Global Segments in CPU DRAM. SSD support is planned as a future capability; it is not available in the current implementation.
 </Note>
 
-<!-- src: SSD roadmap confirmed by documentation author; no implementation claim. -->
-
 <div className="nixl-stack-diagram">
 <div className="nixl-stack-layer"><div className="nixl-stack-layer-title">Application / Framework Adapter</div></div>
 <div className="nixl-stack-agent-box">
@@ -43,7 +37,7 @@ Values must fit the largest staging slot. The current store is volatile and uses
 <div className="nixl-stack-agent-layer nixl-stack-agent-core"><div className="nixl-stack-agent-layer-title">NSClient</div><div className="nixl-stack-agent-chips"><span className="nixl-stack-chip">Staging</span><span className="nixl-stack-chip">Global Segment</span><span className="nixl-stack-chip">NIXL Agent</span></div></div>
 <div className="nixl-stack-agent-layer nixl-stack-agent-sb"><div className="nixl-stack-agent-layer-title">NIXL → UCX → CPU DRAM</div></div>
 </div>
-<div className="nixl-stack-category"><div className="nixl-stack-category-header">Manager -- NSClient control path</div><div className="nixl-stack-agent-chips"><span className="nixl-stack-chip">Placement</span><span className="nixl-stack-chip">Slot States</span><span className="nixl-stack-chip">Reference Counts</span><span className="nixl-stack-chip">Peer Catalog</span></div></div>
+<div className="nixl-stack-agent-box"><div className="nixl-stack-agent-layer nixl-stack-agent-core"><div className="nixl-stack-agent-layer-title">Manager -- NSClient control path</div><div className="nixl-stack-agent-chips"><span className="nixl-stack-chip">Placement</span><span className="nixl-stack-chip">Slot States</span><span className="nixl-stack-chip">Reference Counts</span><span className="nixl-stack-chip">Peer Catalog</span></div></div></div>
 </div>
 
 Payload bytes flow through NSClient staging and NIXL between nodes. The Manager handles metadata only.

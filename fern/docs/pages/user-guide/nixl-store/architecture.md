@@ -13,11 +13,9 @@ Run one NSClient on each participating node and attach each application to its l
 
 The Manager decides where objects live and when readers can see them. NSClients move payload bytes directly through NIXL. No payload passes through the Manager. NIXL Store provides no separate transport: it uses NIXL registration, connection metadata and transfers. See [NIXL Architecture](/nixl/getting-started/architecture) for the underlying agent model.
 
-<!-- src: NB_Nixl-Store/crates/nsclient/src/orchestration/put.rs; crates/nsconnector/src/config.rs -->
-
 ## Memory Pool
 
-A **region** is a contiguous range of NSClient memory registered with NIXL as one unit, with its own epoch. In NIXL Store, a **segment** is a unit of store capacity backed by one registered region -- not a NIXL memory segment. A **slot** is one allocation inside a segment. These distinctions separate the lifetime of registered memory from the lifetime of each object it contains.
+A **region** is a contiguous range of NSClient memory registered with NIXL as one unit, with its own epoch. In NIXL Store, a **segment** is a unit of store capacity backed by one registered region -- not a NIXL memory segment. A **slot** is one allocation inside a segment.
 
 **Staging** is a region with no segment. It is shared with connectors and is never published to peers. A **Global Segment** holds objects placed by the Manager. Both use CPU DRAM.
 
@@ -28,13 +26,11 @@ A **region** is a contiguous range of NSClient memory registered with NIXL as on
 
 Staging uses configured slot classes. Global Segments specify capacity, minimum and maximum object sizes, and alignment. A large Global Segment alone does not permit larger writes: every value must also fit a staging slot. An oversized value returns `VALUE_TOO_LARGE`. Staging contention can instead require waiting for a suitable slot.
 
-A transfer writes a reserved slot, not an already visible object's storage. Failed writes therefore cannot publish partial replacements. Uncertain transfers require quarantine rather than immediate buffer reuse. Isolation depends on both the key lifecycle and the transfer lifetime.
+A transfer writes a reserved slot, not an already visible object's storage. Failed writes therefore cannot publish partial replacements. Uncertain transfers require quarantine rather than immediate buffer reuse.
 
 <Note>
 The NSClient registers regions at startup. Individual operations reuse that registration rather than registering each application's buffers as store capacity. SSD support is planned as a future capability.
 </Note>
-
-<!-- src: NB_Nixl-Store/crates/nsclient/src/registration.rs; crates/nsclient/nsclient.example.toml; crates/nsclient/src/orchestration/put.rs -->
 
 ## Manager
 
@@ -43,8 +39,6 @@ The Manager binds namespace/key pairs to slots, tracks their states and referenc
 NSClients publish connection metadata and region metadata through the Manager. Another NSClient fetches peer metadata lazily when it needs a transfer destination or source. Epoch checks distinguish registrations so cached information is not accepted for a different region lifetime. This path does not require an application-managed etcd service; compare [Metadata Exchange with etcd](/nixl/user-guide/metadata-exchange-with-etcd).
 
 An unavailable Manager prevents reliable metadata progress. An already posted NIXL transfer can have its own completion, but that does not establish a committed write or release a reference. Applications must inspect operation results rather than infer store success from network activity. A Manager restart loses its in-memory bindings; the store does not provide persistent recovery or Manager high availability.
-
-<!-- src: NB_Nixl-Store/crates/manager/src/service.rs; crates/manager/src/placement.rs; crates/nsclient/src/orchestration/get.rs -->
 
 ## NSClient and NSConnector
 
@@ -63,11 +57,9 @@ Copy functions run on the connector's copy worker. Their buffer views expire whe
 Your framework orders producers and consumers. NIXL Store does not schedule application work or notify a consumer that a producer is ready. A key becomes available through the store's commit contract.
 </Info>
 
-<!-- src: NB_Nixl-Store/crates/python-bindings/src/callback.rs; Python contract supplied by documentation author -->
-
 ## Data Flow: Two-Node Example
 
-Node A runs a producer and node B runs a consumer. Both run an NSClient and share a Manager. The following phases show initialization, write, read, clear and failure handling. Storage placement is the Manager's decision; the diagrams show an object stored on node B.
+Node A runs an application that produces and consumes objects. Node B provides storage. Both run an NSClient and share a Manager. The following phases show initialization, write, read, clear and failure handling. Solid arrows show requests; dashed arrows show results or observed NIXL transfer completion. Transfer completion arrows represent the initiating agent observing completion, not an application-level reply from the storage process. Storage placement is the Manager's decision; the diagrams show an object stored on node B.
 
 <Info>
 Initialize services and attachments once. Repeat put, get and clear for each application lifecycle. A new connector does not need a private NIXL registration.
@@ -76,12 +68,12 @@ Initialize services and attachments once. Repeat put, get and clear for each app
 ### Initialization
 
 <div className="diagram-light sequence-diagram">
-<Frame caption="Initialization">
+<Frame caption="Phase 1: Initialization">
 <img src="../../../assets/figures/nixl-store/initialization-light.svg" alt="Initialization control and data flow" />
 </Frame>
 </div>
 <div className="diagram-dark sequence-diagram">
-<Frame caption="Initialization">
+<Frame caption="Phase 1: Initialization">
 <img src="../../../assets/figures/nixl-store/initialization-dark.svg" alt="Initialization control and data flow" />
 </Frame>
 </div>
@@ -99,12 +91,12 @@ attach producer and consumer connectors
 ### Put
 
 <div className="diagram-light sequence-diagram">
-<Frame caption="Put">
+<Frame caption="Phase 2: Put">
 <img src="../../../assets/figures/nixl-store/put-light.svg" alt="Put control and data flow" />
 </Frame>
 </div>
 <div className="diagram-dark sequence-diagram">
-<Frame caption="Put">
+<Frame caption="Phase 2: Put">
 <img src="../../../assets/figures/nixl-store/put-dark.svg" alt="Put control and data flow" />
 </Frame>
 </div>
@@ -121,12 +113,12 @@ upsert(key, replacement)
 ### Get
 
 <div className="diagram-light sequence-diagram">
-<Frame caption="Get">
+<Frame caption="Phase 3: Get">
 <img src="../../../assets/figures/nixl-store/get-light.svg" alt="Get control and data flow" />
 </Frame>
 </div>
 <div className="diagram-dark sequence-diagram">
-<Frame caption="Get">
+<Frame caption="Phase 3: Get">
 <img src="../../../assets/figures/nixl-store/get-dark.svg" alt="Get control and data flow" />
 </Frame>
 </div>
@@ -145,17 +137,17 @@ check status, destination_state and bytes_copied
 ### Clear
 
 <div className="diagram-light sequence-diagram">
-<Frame caption="Clear">
+<Frame caption="Phase 4: Clear">
 <img src="../../../assets/figures/nixl-store/clear-light.svg" alt="Clear control and data flow" />
 </Frame>
 </div>
 <div className="diagram-dark sequence-diagram">
-<Frame caption="Clear">
+<Frame caption="Phase 4: Clear">
 <img src="../../../assets/figures/nixl-store/clear-dark.svg" alt="Clear control and data flow" />
 </Frame>
 </div>
 
-Clear returns a completion handle. Waiting for successful completion establishes invisibility to new readers, not immediate physical reclamation. Readers that acquired the old binding still finish safely. The Manager reclaims the slot after those references drain. This distinction matters when sizing capacity for repeated replacement and deletion under concurrent reads.
+Clear returns a completion handle. Waiting for successful completion establishes invisibility to new readers, not immediate physical reclamation. Readers that acquired the old binding still finish safely. The Manager reclaims the slot after those references drain.
 
 ```
 future = clear(key)
@@ -165,12 +157,12 @@ status = future.wait()
 ### Failure and Scaling
 
 <div className="diagram-light sequence-diagram">
-<Frame caption="Failure">
+<Frame caption="Phase 5: Failure and Scaling">
 <img src="../../../assets/figures/nixl-store/failure-light.svg" alt="Failure control and data flow" />
 </Frame>
 </div>
 <div className="diagram-dark sequence-diagram">
-<Frame caption="Failure">
+<Frame caption="Phase 5: Failure and Scaling">
 <img src="../../../assets/figures/nixl-store/failure-dark.svg" alt="Failure control and data flow" />
 </Frame>
 </div>
@@ -187,5 +179,3 @@ if WRITE fails:
     quarantine staging and target slot
     report failure without publishing the key
 ```
-
-<!-- src: NB_Nixl-Store/crates/nsclient/src/orchestration/put.rs; crates/nsclient/src/orchestration/get.rs; crates/nsclient/src/rpc.rs; crates/manager/src/service.rs -->
