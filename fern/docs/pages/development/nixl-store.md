@@ -41,7 +41,7 @@ Keep `runtime/store/Cargo.lock` in sync with this dependency. Building and testi
 | `python/nixl_store` | Python package included by maturin |
 | `bench` | Benchmark executable and launch scripts |
 
-The Manager protocol lives in `crates/types/proto/manager.proto` and is compiled by prost-build. Component notes live in `docs/`. The Python binding guide lives in `crates/python-bindings/README.md`. The IPC-backed node and connector workflow depends on Linux.
+The Manager protocol lives in `crates/types/proto/manager.proto` and is compiled by prost-build. Component notes live in `docs/`. The Python binding guide lives in `crates/python-bindings/README.md`.
 
 ## Building
 
@@ -164,7 +164,7 @@ CI separates fast checks from native transfer coverage:
 | Native suite - Jenkins | `/build` | Store NIXL/UCX tests and full end-to-end coverage against prebuilt NIXL and UCX libraries |
 | Cross-project smoke test | Regular `/build` on NIXL PRs | One Store end-to-end smoke test to detect integration breakage without the full Store suite |
 
-The fast gate is planned in `.github/workflows/store-checks.yml`, with a feedback target of about two minutes. Native tests integrate with NIXL's Rust test harness. The CI toolchain uses Rust 1.95 for Store. Workflow filtering is planned to avoid unrelated full-suite runs and allow Store builds to skip unrelated GPU coverage. Store changes do not need the full NIXL matrix, and ordinary NIXL changes use the Store smoke test rather than the entire Store suite.
+The fast gate is planned in `.github/workflows/store-checks.yml`, with a feedback target of about two minutes. Native tests integrate with NIXL's Rust test harness. The CI toolchain uses Rust 1.95 for Store. Ordinary NIXL changes should use the Store smoke test rather than the entire Store suite.
 
 ## Bindings
 

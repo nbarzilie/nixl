@@ -64,7 +64,7 @@ Your framework orders producers and consumers. NIXL Store does not schedule appl
 
 ## Data Flow: Two-Node Example
 
-Node A runs an application that produces and consumes objects. Node B provides storage. Both run an NSClient and share a Manager. The following phases show initialization, write, read, clear and failure handling. Solid arrows show requests; dashed arrows show results or observed NIXL transfer completion. Transfer completion arrows represent the initiating agent observing completion, not an application-level reply from the storage process. Solid arrows show requests; dashed arrows show results or observed NIXL transfer completion. Transfer completion arrows represent the initiating agent observing completion, not an application-level reply from the storage process. Storage placement is the Manager's decision; the diagrams show an object stored on node B.
+Node A runs an application that produces and consumes objects. Node B provides storage. Both run an NSClient and share a Manager. The following phases show initialization, write, read, clear and failure handling. Solid arrows show requests; dashed arrows show results or observed NIXL transfer completion. Transfer completion arrows represent the initiating agent observing completion, not an application-level reply from the storage process. Storage placement is the Manager's decision; the diagrams show an object stored on node B.
 
 <Info>
 Initialize services and attachments once. Repeat put, get and clear for each application lifecycle. A new connector does not need a private NIXL registration.
