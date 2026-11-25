@@ -7,20 +7,17 @@ This walkthrough starts a Manager, one NSClient and a Python application on a Li
 
 ## Install
 
-Install Rust and the system prerequisites from the [Developer Guide](/nixl/developer-guide/nixl-store). Build the services, then fetch the pinned NIXL runtime libraries:
+Install Rust and the system prerequisites from the [Developer Guide](/nixl/developer-guide/nixl-store). Build NIXL with UCX from the same checkout as described in [Building with NIXL](/nixl/developer-guide/nixl-store#building-with-nixl), and set the library and plugin paths to that installation. Then build Store and its Python package:
 
 ```bash
 cargo build --workspace --locked
-ci/fetch-nixl.sh .nixl
-export LD_LIBRARY_PATH="$PWD/.nixl/lib/.nixl_cu13.mesonpy.libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export NIXL_PLUGIN_DIR="$PWD/.nixl/lib/.nixl_cu13.mesonpy.libs/plugins"
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r python/requirements-dev.txt
 .venv/bin/maturin build --release --locked --compatibility linux --interpreter .venv/bin/python --out target/python-wheels
 .venv/bin/python -m pip install --no-deps target/python-wheels/nixl_store-0.1.0-cp312-cp312-linux_x86_64.whl
 ```
 
-Export the same library paths in the NSClient terminal. Installing the wheel installs the application library; it does not start either service. The fetched wheel supplies UCX for this CPU path.
+Export the same library paths in the NSClient terminal. Installing the wheel installs the application library; it does not start either service. The NSClient uses the NIXL/UCX libraries from the same checkout.
 
 ## Start the Manager
 

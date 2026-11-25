@@ -25,7 +25,7 @@ A **region** is a contiguous range of NSClient memory registered with NIXL as on
 | Local Segment | Owning NSClient allocator | Yes | Registered in the catalog; allocation owned by the NSClient |
 | Global Segment | Manager allocator | Yes | Registered in the catalog |
 
-Allocators are pluggable per segment. Fixed size-class allocation suits object sizes known in advance; buddy allocation supports dynamically sized objects. Different segments can use different allocators. Staging uses configured slot classes, while segment configuration defines capacity, object-size bounds and alignment. A large Global Segment alone does not permit larger writes: every value must also fit a staging slot. An oversized value returns `VALUE_TOO_LARGE`. Staging contention can instead require waiting for a suitable slot.
+Allocators are pluggable per segment. Fixed size-class allocation suits object sizes known in advance; buddy allocation supports dynamically sized objects. Different segments can use different allocators. Staging uses configured slot classes, while segment configuration defines capacity, object-size bounds and alignment. Adding storage does not fix a value that cannot fit staging. In the staged transfer path, every value must fit a staging slot, regardless of the Global Segment capacity. An oversized value returns `VALUE_TOO_LARGE`. Staging contention can instead require waiting for a suitable slot.
 
 A transfer writes a reserved slot, not an already visible object's storage. Failed writes therefore cannot publish partial replacements. Uncertain transfers require quarantine rather than immediate buffer reuse.
 

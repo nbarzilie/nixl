@@ -7,23 +7,23 @@ This page covers the Rust workspace in `runtime/store`: building services, runni
 
 ## Prerequisites
 
-Use Linux x86_64 for the complete service and Python workflow. The workspace uses Rust edition 2024 and pins Rust 1.95.0. Install a C toolchain, `clang` and `libclang-dev` for bindgen. The types crate obtains protoc through `protoc-bin-vendored`; a separate system protoc installation is not required.
+The services and Rust connector require Linux. The Python package targets Linux x86_64. The Rust services and direct connector API have no x86_64-specific build restriction, but aarch64 builds and runtime behavior are not yet validated by this guide. The workspace uses Rust edition 2024 and pins Rust 1.95.0. Install a C toolchain, `clang` and `libclang-dev` for bindgen. The types crate obtains protoc through `protoc-bin-vendored`; a separate system protoc installation is not required.
 
-Python builds require CPython 3.12 with development headers and venv support. Install the project's `python/requirements-dev.txt` into a virtual environment for maturin and test tools. The extension is not an arbitrary-version Python wheel: its current package metadata selects Python 3.12.
+Python builds require CPython 3.12 with development headers and venv support. Install the project's `python/requirements-dev.txt` into a virtual environment for maturin and test tools. The extension's current package metadata selects Python 3.12.
 
-The pinned NIXL runtime is 1.5.0, matching the workspace's `nixl-sys` dependency. The fetched wheel includes UCX and supports the CPU DRAM path without CUDA or a GPU. UCX supplies the network transport; see [UCX](/nixl/user-guide/backend-selection/ucx) for transport setup. A successful Rust compilation alone does not verify that runtime libraries and plugins can be loaded.
+NIXL Store is compatible with the NIXL version it is released with. Store and NIXL versions advance together; compatibility testing covers the colocated release, not every combination of versions. The CPU DRAM path uses UCX between data nodes and does not require a GPU. See [UCX](/nixl/user-guide/backend-selection/ucx) for transport setup.
 
-## Getting NIXL
+## Building with NIXL
 
-```bash
-ci/fetch-nixl.sh .nixl
-export LD_LIBRARY_PATH="$PWD/.nixl/lib/.nixl_cu13.mesonpy.libs${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
-export NIXL_PLUGIN_DIR="$PWD/.nixl/lib/.nixl_cu13.mesonpy.libs/plugins"
+Build NIXL with UCX from the same checkout, following [Building NIXL from Source](/nixl/developer-guide/building-nixl-from-source). Use that build's libraries and plugins when running Store services and transfer tests. Set `LD_LIBRARY_PATH` to the installed library directory and `NIXL_PLUGIN_DIR` to its plugin directory.
+
+Store has a standalone Cargo workspace at `runtime/store/Cargo.toml`, like `examples/rust/Cargo.toml`. It does not require changes to NIXL's root workspace. Its NIXL dependency points to the in-tree Rust bindings:
+
+```toml
+nixl-sys = { path = "../../src/bindings/rust" }
 ```
 
-The script downloads a pinned wheel and verifies its SHA-256 checksum before extracting libraries. It reuses a cached wheel only when the checksum matches. Keep the runtime version aligned with `nixl-sys` when updating dependencies.
-
-For a local NIXL build, follow [Building NIXL from Source](/nixl/developer-guide/building-nixl-from-source). Point the runtime library and plugin paths to that build's installed libraries instead of the wheel extraction. Use a compatible NIXL version and include UCX. The store's default stub-based build loads NIXL at runtime; changing these paths changes the loaded implementation, not the store API.
+Keep `runtime/store/Cargo.lock` in sync with this dependency. Building and testing Store against the colocated bindings replaces the separate pinned-wheel download workflow.
 
 ## Repository Layout
 
@@ -37,12 +37,11 @@ For a local NIXL build, follow [Building NIXL from Source](/nixl/developer-guide
 | `crates/manager` | Metadata service library and binary |
 | `crates/nsclient` | Node runtime library and binary |
 | `crates/nsconnector` | Application library |
-| `crates/nsconnector-test-peer` | Service-free connector test executable |
 | `crates/python-bindings` | Native Python extension |
 | `python/nixl_store` | Python package included by maturin |
 | `bench` | Benchmark executable and launch scripts |
 
-The Manager protocol lives in `crates/types/proto/manager.proto` and is compiled by prost-build. Component notes live in `docs/`; the older Python design there has superseded signatures. The Python binding guide lives in `crates/python-bindings/README.md`. The IPC-backed node and connector workflow depends on Linux.
+The Manager protocol lives in `crates/types/proto/manager.proto` and is compiled by prost-build. Component notes live in `docs/`. The Python binding guide lives in `crates/python-bindings/README.md`. The IPC-backed node and connector workflow depends on Linux.
 
 ## Building
 
@@ -77,20 +76,57 @@ Run these in separate terminals, with the runtime paths exported for the NSClien
 | Manager | `--request-queues` | `1` |
 | NSClient | `--config` | No file |
 | NSClient | `--manager` | `127.0.0.1:50051` |
-| NSClient | `--socket` | Required here or in TOML |
+| NSClient | `--socket` | No default |
 | NSClient | `--shutdown-grace` | `10` seconds |
+
+Set the connector socket path with `--socket PATH` or the top-level `socket` key in the TOML file. Startup fails if neither is set. A command-line socket path overrides the file.
 
 Manager placement policy, retained-generation limit and metadata shard counts are `ManagerConfig` settings, not command-line flags. Defaults are local-first placement, a retained-generation limit of two and sixteen shards for each metadata table.
 
-Copy `crates/nsclient/nsclient.example.toml` and pass it with `--config`. Command-line values override corresponding top-level keys. Configure `[staging]` classes, `[[global_segment]]` capacity and object bounds, `[orchestration]` admission and transfer progress, and `[listener]` attachment limits. Unknown keys are rejected.
+Save this configuration as `nsclient.toml` in `runtime/store`:
+
+```toml
+manager = "127.0.0.1:50051"
+socket = "/tmp/nixl-store.sock"
+shutdown_grace = "10s"
+
+[staging]
+page_size = "standard"
+
+[[staging.classes]]
+count = 16
+size = "64KiB"
+
+[[global_segment]]
+length = "2MiB"
+min_object = 1
+max_object = "64KiB"
+alignment = 64
+
+[orchestration]
+shard_count = 4
+max_sessions = 64
+staging_wait_deadline = "60s"
+transfer_deadline = "30s"
+
+[listener]
+handshake_deadline = "5s"
+max_handshakes = 64
+```
+
+```bash
+./target/debug/nixl-store-nsclient --config nsclient.toml
+```
+
+This example provides sixteen staging slots and one Global Segment. `[orchestration]` controls admission and transfer progress; `[listener]` controls connector attachment. The annotated `crates/nsclient/nsclient.example.toml` lists all supported keys and defaults. Command-line values override matching top-level keys. Unknown keys are rejected.
 
 Sizes accept byte counts or `KiB`, `MiB`, `GiB` strings. Durations accept `s`, `ms`, `us`; page sizes accept `standard`, `2MiB`, `1GiB`. Each staging class requires a count and size; each Global Segment requires a length. Check both staging and storage limits when choosing the largest supported object.
 
-Wait for `Manager Global business service started` before attaching nodes. Confirm NSClient startup and attachment through its logs and a successful connector operation. Set `RUST_LOG=debug` to increase the tracing level; the default is `info`, using formatted tracing output. Redirect process output when you need persistent logs. The connector test peer is a substitute test endpoint, not a process to connect to an already running NSClient.
+Wait for `Manager Global business service started` before attaching nodes. Confirm NSClient startup and attachment through its logs and a successful connector operation. Set `RUST_LOG=debug` to increase the tracing level; the default is `info`. Redirect process output when you need persistent logs.
 
 ### Running Across Multiple Nodes
 
-Bind the Manager to a reachable interface and point both NSClients at that IP and port. Each application still uses its node-local Unix socket. Permit the Manager TCP connection and the peer network traffic required by UCX. Payload transfers use separate UCX network connections.
+Bind the Manager to a reachable interface and point both NSClients at that IP and port. Each application still uses its node-local Unix socket. Control traffic between each NSClient and the Manager uses TCP only. Payload transfers use NIXL/UCX between NSClients on the data nodes. Permit the Manager TCP port and configure the data-node network for the selected UCX transport; the Manager does not participate in UCX payload transfers.
 
 Write a key on node A, then read it on node B using the same namespace and compare its bytes. Keep the key until the consumer finishes. The [Quick Start](/nixl/user-guide/nixl-store/quick-start) demonstrates the operations; split its write and read across applications for this check.
 
@@ -102,25 +138,33 @@ Build release binaries, then run `bench/target.sh` on the storage node and `benc
 
 ## Testing
 
-With runtime paths configured, set `NIXL_STORE_REQUIRE_NIXL=1` so tests fail when NIXL is unavailable instead of skipping checks that require it:
+Run formatting and lint checks from `runtime/store`:
 
 ```bash
-cargo build --locked -p nixl-store-nsconnector-test-peer
-export NSCONNECTOR_TEST_PEER="$PWD/target/debug/nixl-store-nsconnector-test-peer"
-export NIXL_STORE_REQUIRE_NIXL=1
-cargo test --workspace --locked
-.venv/bin/python -m pytest python/tests -q
-scripts/test-python-e2e.sh
-scripts/test-python-msrv.sh
-cargo fmt --all - --check
-cargo clippy --workspace --all-targets --locked --no-deps - -D warnings
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --locked --no-deps -- -D warnings
 ```
 
-The NSClient binary integration test starts real services and exercises connector operations, callbacks and batches. Run it with `cargo test --locked -p nixl-store-nsclient --test binary`.
+For the complete workspace test suite, configure the colocated NIXL/UCX runtime paths first. Set `NIXL_STORE_REQUIRE_NIXL=1` so tests fail when NIXL is unavailable instead of skipping checks that require it:
 
-Cargo runs unit and integration tests; append a test-name filter to select one. Real transfer and binary tests require runtime NIXL/UCX libraries. Metadata-only unit tests and the Python tests using the explicit connector test peer do not need running store services. End-to-end Python tests exercise the real services. The MSRV script checks the Python extension against the minimum supported Rust toolchain.
+```bash
+export NIXL_STORE_REQUIRE_NIXL=1
+cargo test --workspace --locked
+scripts/test-python-e2e.sh
+scripts/test-python-msrv.sh
+```
 
-NIXL Store uses NIXL's GitHub Actions CI with a separate runner for per-commit unit tests, formatting and other code checks. Formatting checks source layout; Clippy checks compiler and lint diagnostics, including documented unsafe blocks. Neither replaces transfer tests.
+Cargo runs unit and integration tests; append a test-name filter to select one. The NSClient binary integration test starts real services and exercises connector operations, callbacks and batches. Run it alone with `cargo test --locked -p nixl-store-nsclient --test binary`. Python end-to-end tests exercise the services through the bindings. The MSRV script checks the extension against the minimum supported Rust toolchain.
+
+CI separates fast checks from native transfer coverage:
+
+| Tier | Trigger | Coverage |
+| --- | --- | --- |
+| Fast gate - GitHub Actions | PR changes under `runtime/store/**` | Formatting, Clippy and unit tests from the Store workspace, without building NIXL/UCX or requiring `/build` |
+| Native suite - Jenkins | `/build` | Store NIXL/UCX tests and full end-to-end coverage against prebuilt NIXL and UCX libraries |
+| Cross-project smoke test | Regular `/build` on NIXL PRs | One Store end-to-end smoke test to detect integration breakage without the full Store suite |
+
+The fast gate is planned in `.github/workflows/store-checks.yml`, with a feedback target of about two minutes. Native tests integrate with NIXL's Rust test harness. The CI toolchain uses Rust 1.95 for Store. Workflow filtering is planned to avoid unrelated full-suite runs and allow Store builds to skip unrelated GPU coverage. Store changes do not need the full NIXL matrix, and ordinary NIXL changes use the Store smoke test rather than the entire Store suite.
 
 ## Bindings
 
@@ -166,23 +210,23 @@ Batches preserve input order with per-item results. Duplicate keys receive `DUPL
 | `CLOSED` | Attachment closed |
 | `DEADLINE` | Deadline reached |
 
-Handle reads, asynchronous data methods, GPU buffers and placement-descriptor read hints are future capabilities. SSD support is also planned; no release date or persistence guarantee is implied.
+Handle reads, asynchronous data methods, GPU buffers, placement-descriptor read hints and SSD support are future capabilities.
 
 ## Protocol and Compatibility
 
-The Manager handshake carries protocol version `1`. Treat wire messages and descriptor layouts as compatibility boundaries: update both endpoints and their tests together. A version field does not make mixed-version deployments safe. Do not roll out a changed descriptor layout assuming an older process can interpret it.
+The Manager handshake carries a protocol version. Treat wire messages and descriptor layouts as compatibility boundaries: update both endpoints and their tests together. A version field does not make mixed-version deployments safe. Do not roll out a changed descriptor layout assuming an older process can interpret it.
 
 ## Extending NIXL Store
 
-Start allocator changes in `crates/allocator` and placement changes in `crates/manager/src/placement.rs`. Preserve allocation alignment, ownership and free semantics. Test exhaustion and replacement as well as successful allocation. A new memory type or copy mode also needs registration, transfer, buffer validation and binding changes; an API enum alone does not implement support.
+Start allocator changes in `crates/allocator` and placement changes in `crates/manager/src/placement.rs`. Preserve allocation alignment, ownership and free semantics. Test exhaustion and replacement as well as successful allocation. Add tests and benchmarks for changed behavior. Every optimization or modification should include benchmark results showing no performance degradation under comparable configurations.
 
-Every extension must preserve visibility after commit, prevent reuse while referenced and keep payload bytes out of the Manager. Exercise failure paths where a transfer's final outcome is uncertain. Review protocol and public-contract changes together before changing either side's assumptions.
+Every extension must preserve visibility after commit, prevent reuse while referenced and keep payload bytes out of the Manager. Exercise failure paths where a transfer's final outcome is uncertain. Review protocol and public-contract changes against the component documentation in `runtime/store/docs/` and update the affected documents and tests together.
 
 ## Debugging
 
 Enable `RUST_LOG=debug` and correlate service, request and operation identifiers across node and Manager logs. Inspect catalog and slot state through code-level diagnostics or tests.
 
-For connection errors, check the Manager address, listening interface and route. For attachment errors, check the socket path, same-user admission and handshake timeout. For library loading failures, check both runtime environment variables. For capacity failures, compare Global Segment capacity and object limits with staging slot sizes. Adding storage does not fix a value that cannot fit staging.
+For connection errors, check the Manager address, listening interface and route. For attachment errors, check the socket path, same-user admission and handshake timeout. For library loading failures, check both runtime environment variables. For capacity failures, compare Global Segment capacity and object limits with staging slot sizes.
 
 ## Contributing
 
